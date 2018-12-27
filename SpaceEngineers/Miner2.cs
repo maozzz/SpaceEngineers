@@ -711,9 +711,6 @@ public sealed class Miner2 : MyGridProgram {
         }
     }
 
-/* ==============================================================
- * =================== ОБЩЕГО НАЗНАЧЕНИЯ ========================
- * ============================================================*/
     public class Context : StackProc, Tickable {
         public static int ticks;
         private Dictionary<String, object> data;

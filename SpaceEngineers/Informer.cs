@@ -150,7 +150,8 @@ using System.Linq;
             this.action = action;
         }
 
-        public ChangeVarMenuItem(string ctxVarName, object dT, string title, string text) : base(new SimpleReactMsg(title,
+        public ChangeVarMenuItem(string ctxVarName, object dT, string title, string text) : base(new SimpleReactMsg(
+            title,
             null, () => string.Format(text, ctx.get(ctxVarName)))) {
             action = () => {
                 var o = ctx.get(ctxVarName);
@@ -237,5 +238,4 @@ using System.Linq;
 
 /**
  *^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- * Конец КЛАССОВ МЕНЮ
  */
