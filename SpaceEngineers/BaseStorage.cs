@@ -36,7 +36,7 @@ public sealed class BaseStorage : MyGridProgram {
     
     
     private List<IMyTerminalBlock> containers; // контейнеры
-    private IMyTextPanel lcd;
+    private IMyTextSurface lcd;
     StringBuilder sb = new StringBuilder();
 
 
@@ -45,8 +45,7 @@ public sealed class BaseStorage : MyGridProgram {
     Dictionary<string, Decimal> ores = new Dictionary<string, Decimal>();
 
     public Program() {
-        lcd = GridTerminalSystem.GetBlockWithName(baseInfoLcdName) as IMyTextPanel;
-        lcd.ShowPublicTextOnScreen();
+        lcd = Me.GetSurface(0);
         Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
         types.Add("Uranium", "Ur");
@@ -99,22 +98,23 @@ public sealed class BaseStorage : MyGridProgram {
         // Пробегаем все инвентари и суммируем ресурсы
         foreach (IMyTerminalBlock container in containers) {
             for (int i = 0; i < container.InventoryCount; i++) {
-                List<IMyInventoryItem> items = container.GetInventory(i).GetItems();
-                foreach (IMyInventoryItem item in items) {
-                    if (item.Content.TypeId.ToString().Equals("MyObjectBuilder_Ingot")) {
-                        string ingotType = types[item.Content.SubtypeId.ToString()];
+                List<MyInventoryItem> items = new List<MyInventoryItem>();
+                container.GetInventory(i).GetItems(items);
+                foreach (MyInventoryItem item in items) {
+                    if (item.Type.TypeId.ToString().Equals("MyObjectBuilder_Ingot")) {
+                        string ingotType = types[item.Type.SubtypeId.ToString()];
                         if (ingotType == null) {
-                            sb.Append("Exception!!! Add ").Append(item.Content.SubtypeId.ToString())
+                            sb.Append("Exception!!! Add ").Append(item.Type.SubtypeId.ToString())
                                 .Append(" to ore list\n");
                         }
                         else {
                             ingots[ingotType] += (Decimal) item.Amount;
                         }
                     }
-                    if (item.Content.TypeId.ToString().Equals("MyObjectBuilder_Ore")) {
-                        string oreType = types[item.Content.SubtypeId.ToString()];
+                    if (item.Type.TypeId.ToString().Equals("MyObjectBuilder_Ore")) {
+                        string oreType = types[item.Type.SubtypeId.ToString()];
                         if (oreType == null) {
-                            sb.Append("Exception!!! Add ").Append(item.Content.SubtypeId.ToString())
+                            sb.Append("Exception!!! Add ").Append(item.Type.SubtypeId.ToString())
                                 .Append(" to ore list\n");
                         }
                         else {
@@ -126,17 +126,17 @@ public sealed class BaseStorage : MyGridProgram {
         }
 
         // Выводим на дислей
-        sb.Append($"{"     INGOTS",-23} | {"       ORE",-20}\n");
+        sb.Append($"{"     INGOTS",-15} | {"       ORE",-11}\n");
         foreach (KeyValuePair<string, string> type in types) {
-            sb.Append($" {type.Value,-3}:{ingots[type.Value],15:F2}    |   ");
-            sb.Append($" {type.Value,-3}:{ores[type.Value],15:F2} |\n");
+            sb.Append($" {type.Value,-3}:{ingots[type.Value],9:F2}  | ");
+            sb.Append($" {type.Value,-3}:{ores[type.Value],9:F2} |\n");
         }
 
-        lcd.WritePublicText(sb.ToString());
+        lcd.WriteText(sb.ToString());
     }
 
     public void clearDisplay() {
-        lcd.WritePublicText("");
+        lcd.WriteText("");
     }
 
     private void resetStorageResourceCount() {

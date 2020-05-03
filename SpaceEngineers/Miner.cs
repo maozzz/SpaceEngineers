@@ -1,37 +1,31 @@
 using System;
-using System.Text;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using VRageMath;
-using VRage.Game;
-using Sandbox.ModAPI.Interfaces;
+using Sandbox.Game.Entities.Blocks;
 using Sandbox.ModAPI.Ingame;
-using Sandbox.Game.EntityComponents;
-using Sandbox.Game.GameSystems;
-using VRage.Game.Components;
-using VRage.Collections;
-using VRage.Game.ObjectBuilders.Definitions;
-using VRage.Game.ModAPI.Ingame;
-using SpaceEngineers.Game.ModAPI.Ingame;
 using VRage.Game.VisualScripting.Utils;
+using VRageMath;
 
 public sealed class Miner : MyGridProgram {
     public static Context ctx = new Context(new Dictionary<string, object> {
         {"lcdName", "lcd"},
         {"lcdLName", "lcdL"},
         {"lcdRName", "lcdR"},
-        {"permitMass", 50000}
+        {"permitMass", 100000},
+        {"shaftN", 0},
+        {"shaftW", 6f},
+        {"shaftL", 6f},
+        {"tunnelDepth", 30},
+        {"autosave", false},
+        {"dockTimer", 30} // Время разгрузки
     });
 
     /**
      * Названия
      */
     public Util util;
-    private String lcdName = "lcd";
-    private String lcdLName = "lcdL";
-    private String lcdRName = "lcdR";
+    public Menu menu;
 
     public enum Stage {
         toDock,
@@ -41,18 +35,16 @@ public sealed class Miner : MyGridProgram {
         undock
     }
 
-    private int stageStatus = 0;
+    private int stageStatus;
 
     private Stage stage = Stage.pause;
 
-    public RCMovement rcMovement;
+    public Rider rider;
     public IMyTextPanel lcd;
     public IMyTextPanel lcdL;
     public IMyTextPanel lcdR;
-    public List<IMyGyro> gyro = new List<IMyGyro>();
-    public IMyRemoteControl rc;
+    public IMyShipController rc; //IMyShipController
 
-    public static IMyGridTerminalSystem gts;
     private List<IMyShipConnector> connectors = new List<IMyShipConnector>();
 
     private Vector3D dockPoint;
@@ -65,53 +57,50 @@ public sealed class Miner : MyGridProgram {
     private Vector3D mineGlissade;
     private Vector3D mineOrientation;
     private Vector3D currentTunnelPoint;
-
-    private int shaftN = 80;
-    private int tunnelDepth = 20;
-    private float shaftW = 6;
-    private float shaftL = 6;
+    
     private int shaftsLimit = 400;
     private float mineSpeedK = 0.6f;
-    private Boolean systemOverload = false;
+    private bool systemOverload;
 
-    private int ticks = 0;
-//    private int permitMass = 80000;
-
-    private int timerTicks = 0;
+    private int timerTicks;
+    private StackProc process = new StackProc();
 
     public Program() {
-        util = new Util();
-        gts = GridTerminalSystem;
+        init();
+    }
+
+    private string init() {
+        ctx.putForce("gts", GridTerminalSystem);
+        ctx.putForce("runtime", Runtime);
+        util = ctx.putForce("utils", new Util());
         GridTerminalSystem.GetBlocksOfType(connectors, connector => true);
-        util.findBlockByType(ref rc);
-        lcd = GridTerminalSystem.GetBlockWithName(ctx.get("lcdName").ToString()) as IMyTextPanel;
-        lcdL = GridTerminalSystem.GetBlockWithName(ctx.get("lcdLName").ToString()) as IMyTextPanel;
-        lcdR = GridTerminalSystem.GetBlockWithName(ctx.get("lcdRName").ToString()) as IMyTextPanel;
-        GridTerminalSystem.GetBlocksOfType(gyro, g => true);
-        rcMovement = new RCMovement(GridTerminalSystem, rc, gyro, lcdR);
+        ctx.putForce("rc", util.findBlockByType(ref rc));
+        lcd = ctx.putForce("lcd", GridTerminalSystem.GetBlockWithName(ctx.get("lcdName") as string) as IMyTextPanel);
+        lcdL = ctx.putForce("lcdL", GridTerminalSystem.GetBlockWithName(ctx.get("lcdLName") as string) as IMyTextPanel);
+        lcdR = ctx.putForce("lcdR", GridTerminalSystem.GetBlockWithName(ctx.get("lcdRName") as string) as IMyTextPanel);
+        ctx.putForce("rider", new Rider(lcdR));
+        ctx.get(ref rider);
         Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
-        // Инициализация меню
-        Menu menu = new SimpleMenu("MainMenu", null);
-        Menu submenu = new SimpleMenu("PermitMass", menu);
-        submenu.add(new ChangeVarMenuItem(
-            new SimpleReactMsg("increase", null, () => string.Format("m = {0}", ctx.get("permitMass"))),
-            () => ctx.putForce("permitMass", (int) ctx.get("permitMass") + 1000)));
-        submenu.add(new ChangeVarMenuItem(
-            new SimpleReactMsg("decrease", null, () => string.Format("m = {0}", ctx.get("permitMass"))),
-            () => ctx.putForce("permitMass", (int) ctx.get("permitMass") - 1000)));
+        initMenu(lcd);
+        return "inited";
     }
 
     public void Main(string argument, UpdateType updateSource) {
-        ticks++;
+        ctx.putForce("arg", argument);
+        ctx.tick();
+
         if (timerTicks > 0) timerTicks--;
-        rcMovement.tick();
-        if (ticks % 60 == 0 || stage == Stage.docked) {
+        rider.tick();
+        if (Context.ticks % 10 == 0 || stage == Stage.docked) {
             checkSystem();
+            if (Context.ticks % 100 == 0 && ((bool)ctx.get("autosave"))) save();
         }
 
         if (systemOverload) {
-            lcdL.WritePublicText($"SYSTEM OVERLOADED!!!\n", true);
+            lcdL.WriteText("SYSTEM OVERLOADED!!!\n");
+        } else {
+            lcdL.WriteText("MASS: " + rider.totalMass);
         }
 
         switch (argument) {
@@ -122,10 +111,7 @@ public sealed class Miner : MyGridProgram {
                         dockConnector = connector;
                         dockPoint = rc.GetPosition() + dockConnector.WorldMatrix.Forward * 0.3;
                         dockGlissade = dockPoint + dockConnector.WorldMatrix.Backward * 10 + rc.WorldMatrix.Up * 5;
-                        lcdL.WritePublicText("DOCK SETTED\n");
-                        lcdL.WritePublicText($"cn: {dockPoint.X,6:F0} {dockPoint.Y,6:F0} {dockPoint.Y,6:F0}\n", true);
-                        lcdL.WritePublicText(
-                            $"gl: {dockGlissade.X,6:F0} {dockGlissade.Y,6:F0} {dockGlissade.Y,6:F0}\n", true);
+                        lcdL.WriteText("Connector: " + dockConnector.CustomName);
                     }
                 });
                 break;
@@ -137,6 +123,15 @@ public sealed class Miner : MyGridProgram {
                 break;
             case "mine":
                 mine();
+                break;
+            case "save":
+                save();
+                break;
+            case "load":
+                load();
+                break;
+            case "init":
+                init();
                 break;
             case "pause":
                 pause();
@@ -157,9 +152,116 @@ public sealed class Miner : MyGridProgram {
                 undock();
                 break;
         }
+
+        if (stage != Stage.pause)
+            process.exec();
+        if (Context.ticks % 60 == 0 || ctx.get("arg").ToString() != null) {
+            lcd.WriteText(menu.exec());
+        }
+    }
+
+    private void initMenu(IMyTextPanel lcd) {
+        menu = ctx.putForce("menu", new SimpleMenu("menu", null));
+
+        Menu saves = new SimpleMenu("saves", menu);
+        saves.add(new ChangeVarMenuItem(new SimpleReactMsg(
+            "autosave",
+            null, () => string.Format("={0}", ctx.get("autosave"))), () => {
+            ctx.putForce("autosave", !((bool) ctx.get("autosave")));
+        }));
+        saves.add(new SimpleMenuItem(new SimpleReactMsg("save", null, ()=> string.Format("{0}", save()))));
+        saves.add(new SimpleMenuItem(new SimpleReactMsg("load", null, ()=> string.Format("{0}", load()))));
+        
+        Menu submenu = new SimpleMenu("variables", menu);
+
+        Menu shaftN = new SimpleMenu("shaftN", submenu);
+        shaftN.add(new ChangeVarMenuItem("shaftN", 1, "shNum+", "={0}"));
+        shaftN.add(new ChangeVarMenuItem("shaftN", -1, "shNum-", "={0}"));
+        submenu.add(shaftN);
+
+        Menu shaftW = new SimpleMenu("shaftW", submenu);
+        shaftW.add(new ChangeVarMenuItem("shaftW", 0.2f, "shftW+", "={0}"));
+        shaftW.add(new ChangeVarMenuItem("shaftW", -0.2f, "shftW-", "={0}"));
+        submenu.add(shaftW);
+
+        Menu shaftL = new SimpleMenu("shaftL", submenu);
+        shaftL.add(new ChangeVarMenuItem("shaftL", 0.2f, "shftL+", "={0}"));
+        shaftL.add(new ChangeVarMenuItem("shaftL", -0.2f, "shftL-", "={0}"));
+        submenu.add(shaftL);
+
+        Menu tunDep = new SimpleMenu("tunn depth", submenu);
+        tunDep.add(new ChangeVarMenuItem("tunnelDepth", 1, "td+", "={0}"));
+        tunDep.add(new ChangeVarMenuItem("tunnelDepth", -1, "td-", "={0}"));
+        submenu.add(tunDep);
+
+        Menu dockTimer = new SimpleMenu("dock timer", submenu);
+        dockTimer.add(new ChangeVarMenuItem("dockTimer", 1, "td+", "={0}"));
+        dockTimer.add(new ChangeVarMenuItem("dockTimer", -1, "td-", "={0}"));
+        submenu.add(dockTimer);
+
+        Menu permMass = new SimpleMenu("permit mass", submenu);
+        permMass.add(new ChangeVarMenuItem("permitMass", 1000, "pm+", "={0}"));
+        permMass.add(new ChangeVarMenuItem("permitMass", -1000, "pm-", "={0}"));
+        submenu.add(permMass);
+
+        menu.add(saves);
+        menu.add(submenu);
+    }
+
+    public string save() {
+        Util u = (Util) ctx.get("utils");
+        string data = "dockDirection=" + u.vectorToGps(dockDirection, "dockDirection") + "\n";
+        data += "dockPoint=" + u.vectorToGps(dockPoint, "dockPoint") + "\n";
+        data += "dockGlissade=" + u.vectorToGps(dockGlissade, "dockGlissade") + "\n";
+        data += "mineArea=" + u.vectorToGps(mineArea, "mineArea") + "\n";
+        data += "mineDirection=" + u.vectorToGps(mineDirection, "mineDirection") + "\n";
+        data += "mineOrientation=" + u.vectorToGps(mineOrientation, "mineOrientation") + "\n";
+        data += "mineGlissade=" + u.vectorToGps(mineGlissade, "mineGlissade") + "\n";
+        data += "tunnelDepth=" + ctx.get("tunnelDepth") + "\n";
+        data += "dockTimer=" + ctx.get("dockTimer") + "\n";
+        data += "shaftL=" + ctx.get("shaftL") + "\n";
+        data += "shaftW=" + ctx.get("shaftW") + "\n";
+        data += "shaftN=" + ctx.get("shaftN") + "\n";
+        data += "permitMass=" + ctx.get("permitMass") + "\n";
+        data += "connectorName=" + dockConnector.CustomName + "\n";
+        lcd.CustomData = data;
+        lcdR.WriteText("SAVED!");
+        return "saved";
+    }
+
+    public string load() {
+        Util u = (Util) ctx.get("utils");
+        string data = lcd.CustomData;
+        string[] rows = data.Split('\n');
+        foreach (string row in rows) {
+            if(!row.Contains('=')) continue;
+            string[] pair = row.Split('=');
+            string key = pair[0];
+            string val = pair[1];
+            if (key.Equals("dockPoint")) dockPoint = u.vectorFromGps(val);
+            if (key.Equals("dockDirection")) dockDirection = u.vectorFromGps(val);
+            if (key.Equals("dockGlissade")) dockGlissade = u.vectorFromGps(val);
+            if (key.Equals("mineArea")) mineArea = u.vectorFromGps(val);
+            if (key.Equals("mineDirection")) mineDirection = u.vectorFromGps(val);
+            if (key.Equals("mineOrientation")) mineOrientation = u.vectorFromGps(val);
+            if (key.Equals("mineGlissade")) mineGlissade = u.vectorFromGps(val);
+            if (key.Equals("tunnelDepth")) ctx.putForce("tunnelDepth", int.Parse(val));
+            if (key.Equals("dockTimer")) ctx.putForce("dockTimer", int.Parse(val));
+            if (key.Equals("shaftL")) ctx.putForce("shaftL", float.Parse(val));
+            if (key.Equals("shaftW")) ctx.putForce("shaftW", float.Parse(val));
+            if (key.Equals("shaftN")) ctx.putForce("shaftN", int.Parse(val));
+            if (key.Equals("permitMass")) ctx.putForce("permitMass", int.Parse(val));
+            if (key.Equals("connectorName")) {
+                dockConnector = (IMyShipConnector) GridTerminalSystem.GetBlockWithName(val);
+                if (dockConnector == null) throw new Exception("Loaded dock Connector empty");
+            }
+        }
+        lcdR.WriteText("LOADED!");
+        return "loaded";
     }
 
     private void setMiningArea() {
+        lcdL.WriteText("MINING AREA SETTED");
         mineArea = rc.GetPosition();
         if (rc.GetTotalGravity().Length() > 0.1) {
             mineDirection = Vector3D.Normalize(rc.GetTotalGravity());
@@ -169,10 +271,8 @@ public sealed class Miner : MyGridProgram {
             mineOrientation = rc.WorldMatrix.Forward;
         }
 
-        mineGlissade = mineArea + rc.WorldMatrix.Up * 30 + rc.WorldMatrix.Backward * 10;
-        lcdL.WritePublicText("MINING AREA SETTED\n");
-        lcdL.WritePublicText($"mn: {mineArea.X,6:F0} {mineArea.Y,6:F0} {mineArea.Y,6:F0}\n", true);
-        lcdL.WritePublicText($"gl: {mineGlissade.X,6:F0} {mineGlissade.Y,6:F0} {mineGlissade.Y,6:F0}\n", true);
+        mineGlissade = mineArea + rc.WorldMatrix.Up * 20 + rc.WorldMatrix.Backward * 20;
+        lcdL.WriteText("MINING AREA SETTED");
     }
 
     /**
@@ -216,15 +316,15 @@ public sealed class Miner : MyGridProgram {
     }
 
     private void checkSystem() {
-        rcMovement.resetMass();
+        rider.resetMass();
         int permitMass = (int) ctx.get("permitMass");
-        systemOverload = rcMovement.totalMass >
-                         (permitMass + ((stage == Stage.mine && stageStatus == 2) ? 0.1 * permitMass : 0));
+        systemOverload = rider.totalMass >
+                         permitMass + (stage == Stage.mine && stageStatus == 2 ? 0.1 * permitMass : 0);
     }
 
     private void pause() {
         stage = Stage.pause;
-        rcMovement.freeControl();
+        rider.freeControl();
         drillsOn(false);
         Runtime.UpdateFrequency = UpdateFrequency.Update100;
     }
@@ -232,10 +332,10 @@ public sealed class Miner : MyGridProgram {
     private void docked() {
         if (stage != Stage.docked) {
             stage = Stage.docked;
-            timerTicks = 6;
+            timerTicks = (int) ctx.get("dockTimer");
         }
 
-        lcdL.WritePublicText($"TIMER: {timerTicks}\n", true);
+        lcdL.WriteText($"TIMER: {timerTicks}\n");
         if (timerTicks > 0) return;
         if (!systemOverload) {
             stage = Stage.undock;
@@ -245,22 +345,20 @@ public sealed class Miner : MyGridProgram {
     private void undock() {
         dockConnector.Disconnect();
         Runtime.UpdateFrequency = UpdateFrequency.Update10;
-        if (moveToPointStage(dockGlissade, dockDirection, dockDirection)) {
+        if (rider.moveTo(dockGlissade, dockDirection, dockDirection)) {
             mine();
         }
     }
 
     private void mine() {
-        lcdL.WritePublicText($"SHAFT NUM: {shaftN}\n");
         if (stage != Stage.mine) {
             stageStatus = 0;
             stage = Stage.mine;
             return;
         }
-
         switch (stageStatus) {
             case 0: // подходим к глиссаде
-                if (moveToPointStage(mineGlissade)) stageStatus++;
+                if (rider.moveTo(mineGlissade)) stageStatus++;
                 break;
             case 1: // подходим к месту майнинга
                 if (toMineStartArea()) stageStatus++;
@@ -285,7 +383,7 @@ public sealed class Miner : MyGridProgram {
         }
 
         path *= mineSpeedK;
-        moveToPointStage(rc.GetPosition() + path, mineDirection, mineOrientation);
+        rider.moveTo(rc.GetPosition() + path, mineDirection, mineOrientation);
         return false;
     }
 
@@ -295,20 +393,21 @@ public sealed class Miner : MyGridProgram {
         }
 
         drillsOn(true);
-        Vector3D floor = (currentTunnelPoint + mineDirection * tunnelDepth);
+        int tunnelDepth = (int) ctx.get("tunnelDepth");
+        Vector3D floor = currentTunnelPoint + mineDirection * tunnelDepth;
         Vector3D path = floor - rc.GetPosition();
         if (path.Length() < 1) {
-            shaftN++;
+            ctx.putForce("shaftN", (int) ctx.get("shaftN") + 1);
             return true;
         }
 
         path = mineSpeedK * Vector3D.Normalize(path);
-        moveToPointStage(rc.GetPosition() + path, mineDirection, mineOrientation);
+        rider.moveTo(rc.GetPosition() + path, mineDirection, mineOrientation);
         return false;
     }
 
     private void drillsOn(Boolean on) {
-        gts.GetBlocksOfType(new List<IMyShipDrill>(), drill => {
+        GridTerminalSystem.GetBlocksOfType(new List<IMyShipDrill>(), drill => {
             drill.Enabled = on;
             return false;
         });
@@ -316,18 +415,18 @@ public sealed class Miner : MyGridProgram {
 
     private Boolean toMineStartArea() {
         if (systemOverload) {
-            if (moveToPointStage(mineGlissade, -mineOrientation)) {
+            if (rider.moveTo(mineGlissade, -mineOrientation)) {
                 stageStatus = 4;
             }
 
             return false;
         }
 
-        Vector3D spiralXy = GetSpiralXY(shaftN, shaftW, shaftL, shaftsLimit);
-        lcdL.WritePublicText(spiralXy.ToString(), true);
+        Vector3D spiralXy = GetSpiralXY((int) ctx.get("shaftN"),(float) ctx.get("shaftW"), (float) ctx.get("shaftL"), shaftsLimit);
+//        lcd.WriteText(spiralXy.ToString(), true);
         currentTunnelPoint = mineArea + spiralXy.X * mineOrientation +
                              spiralXy.Z * Vector3D.Cross(mineDirection, mineOrientation);
-        return moveToPointStage(currentTunnelPoint, mineOrientation);
+        return rider.moveTo(currentTunnelPoint, mineOrientation);
     }
 
     private void toDock() {
@@ -338,14 +437,14 @@ public sealed class Miner : MyGridProgram {
         }
 
         if (dockConnector == null) {
-            lcdL.WritePublicText("connection undefined\n");
+//            lcd.WriteText("connection undefined\n");
             docked();
             return;
         }
 
         switch (stageStatus) {
             case 0: // конектимся
-                moveToPointStage(dockPoint, dockDirection);
+                rider.moveTo(dockPoint, dockDirection);
                 if (dockConnector.Status == MyShipConnectorStatus.Connectable) {
                     dockConnector.Connect();
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
@@ -354,7 +453,7 @@ public sealed class Miner : MyGridProgram {
 
                 break;
             case 1: // подходим к точке захода
-                if (moveToPointStage(dockGlissade)) {
+                if (rider.moveTo(dockGlissade)) {
                     stageStatus = 0;
                 }
 
@@ -362,65 +461,23 @@ public sealed class Miner : MyGridProgram {
         }
     }
 
-    /**
-     * Перемещение к точке: true - точка достигнута
-     */
-    private bool moveToPointStage(Vector3D point) {
-        Vector3D path = new Vector3D(point.X, point.Y, point.Z) - rc.GetPosition();
-        Vector3D dir = path;
-        dir.Normalize();
-        var length = path.Length();
-        Runtime.UpdateFrequency = length > 5 ? UpdateFrequency.Update10 : UpdateFrequency.Update1;
-        if (length > 0.3) {
-            if (length > 2) {
-                if (rcMovement.setDirection(path))
-                    rcMovement.moveTo(path);
-                else
-                    rcMovement.freeEngines();
-            } else {
-                rcMovement.moveTo(path);
-            }
-            return false;
-        } else {
-            rcMovement.freeControl();
-            return true;
-        }
-    }
 
-    private bool moveToPointStage(Vector3D point, Vector3D direction) {
-        return moveToPointStage(point, direction, direction);
-    }
-
-    private bool moveToPointStage(Vector3D point, Vector3D direction, Vector3D orintation) {
-        Vector3D path = new Vector3D(point.X, point.Y, point.Z) - rc.GetPosition();
-        var length = path.Length();
-        path += path - direction * length;
-        Runtime.UpdateFrequency = length > 5 ? UpdateFrequency.Update10 : UpdateFrequency.Update1;
-        if (length > 0.2) {
-            if (rcMovement.setDirection(orintation))
-                rcMovement.moveTo(path);
-            else
-                rcMovement.freeEngines();
-            return false;
-        } else {
-            rcMovement.freeControl();
-            return true;
-        }
-    }
-
-
-    public class RCMovement {
-        private IMyRemoteControl rc;
-        private List<IMyGyro> gyro;
+/* ==============================================================
+ * =============== КЛАСС RIDER ДЛЯ ПЕРЕМЕЩЕНИЯ ==================
+ * ============================================================*/
+    public class Rider {
+        private IMyShipController rc;
+        private List<IMyGyro> gyro = new List<IMyGyro>();
         private IMyTextPanel lcd;
         private IMyGridTerminalSystem gts;
 
-        private int ticks = 0;
+        private int ticks;
         private float gyroK = 1.5f;
         private float powerK = 0.1f;
         private float nonLinearPowerK = 0.2f;
 
         public float totalMass;
+        private IMyGridProgramRuntimeInfo runtime;
 
         public enum Direction {
             F,
@@ -448,14 +505,16 @@ public sealed class Miner : MyGridProgram {
         public Dictionary<Direction, PowerStat> stats = new Dictionary<Direction, PowerStat>();
         private List<IMyThrust> thAll = new List<IMyThrust>();
 
-        public RCMovement(IMyGridTerminalSystem gts, IMyRemoteControl rc, List<IMyGyro> gyro, IMyTextPanel lcd) {
-            rc.ControlThrusters = true;
-            this.rc = rc;
-            this.gyro = gyro;
+        public Rider(IMyTextPanel lcd) {
+            ctx.get(ref gts);
+            ctx.get(ref rc);
+            ctx.get(ref runtime);
+            gts.GetBlocksOfType(gyro, g => true);
             this.lcd = lcd;
-            this.gts = gts;
             gts.GetBlocksOfType(thAll, thrust => true);
+            rc.ControlThrusters = true;
             resetMass();
+            this.lcd.CustomData = "";
             resetForceStats(Direction.U, Direction.D);
             resetForceStats(Direction.D, Direction.U);
             resetForceStats(Direction.F, Direction.B);
@@ -485,7 +544,7 @@ public sealed class Miner : MyGridProgram {
         }
 
         public void freeEngines() {
-            rc.ControlThrusters = false;
+//            rc.ControlThrusters = false;
             rc.DampenersOverride = true;
             thAll.ForEach(thrust => thrust.ThrustOverride = 0);
         }
@@ -504,25 +563,26 @@ public sealed class Miner : MyGridProgram {
             PowerStat stat;
             switch (dir) {
                 case Direction.U:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.Y < 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Up) > 0.9);
                     break;
                 case Direction.D:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.Y > 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Down) > 0.9);
                     break;
                 case Direction.F:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.Z > 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Forward) > 0.9);
                     break;
                 case Direction.B:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.Z < 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Backward) > 0.9);
                     break;
                 case Direction.L:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.X > 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Left) > 0.9);
                     break;
                 case Direction.R:
-                    gts.GetBlocksOfType(ths, thrust => thrust.GridThrustDirection.X < 0);
+                    gts.GetBlocksOfType(ths, thrust => thrust.WorldMatrix.Backward.Dot(rc.WorldMatrix.Right) > 0.9);
                     break;
             }
 
+            lcd.CustomData += dir.ToString() + ": " + ths.Count + "\n";
             stat.thrusters = ths;
             stat.a = stat.f = 0;
             ths.ForEach(thrust => stat.f += thrust.MaxEffectiveThrust);
@@ -532,17 +592,60 @@ public sealed class Miner : MyGridProgram {
         }
 
         /**
-         * Движение к заданной точке.
+         * Перемещение к точке: true - точка достигнута
          */
-        public void moveTo(Vector3D to) {
-            move(to);
+        public bool moveTo(Vector3D point) {
+            Vector3D path = new Vector3D(point.X, point.Y, point.Z) - rc.GetPosition();
+            Vector3D dir = path;
+            dir.Normalize();
+            var length = path.Length();
+            runtime.UpdateFrequency = length > 5 ? UpdateFrequency.Update10 : UpdateFrequency.Update1;
+            if (length > 0.95) {
+                if (length > 2) {
+                    if (setDirection(path)) {
+                        move(path);
+                    } else {
+                        freeEngines();
+                    }
+                } else {
+                    move(path);
+                }
+
+                return false;
+            }
+
+            freeControl();
+            return true;
+        }
+
+        public bool moveTo(Vector3D point, Vector3D direction) {
+            if (direction.X==0 && direction.Y ==0 && direction.Z==0) throw new Exception("moveTo direction invalid");
+            return moveTo(point, direction, direction);
+        }
+
+        public bool moveTo(Vector3D point, Vector3D direction, Vector3D orintation) {
+            Vector3D path = new Vector3D(point.X, point.Y, point.Z) - rc.GetPosition();
+            var length = path.Length();
+            path += path - direction * length;
+            runtime.UpdateFrequency = length > 5 ? UpdateFrequency.Update10 : UpdateFrequency.Update1;
+            if (length > 0.5) {
+                if (setDirection(orintation)) {
+                    move(path);
+                } else {
+                    freeEngines();
+                }
+                return false;
+            }
+
+            freeControl();
+            return true;
         }
 
         /**
          * Рассчет необходимого ускорения.
          */
         private void move(Vector3D path) {
-            lcd.WritePublicText($"DISTANCE: {path.Length(),8:F2}");
+            lcd.WriteText($"L: {path.Length(),8:F2}");
             thAll.ForEach(thrust => thrust.ThrustOverridePercentage = 0);
             powerDirection(path, rc.WorldMatrix.Forward, Direction.F, Direction.B);
             powerDirection(path, rc.WorldMatrix.Left, Direction.L, Direction.R);
@@ -568,7 +671,7 @@ public sealed class Miner : MyGridProgram {
                 stat = s > 0 ? stats[opp] : stats[direction];
             if (Math.Abs(grav) > 0.1) grav = (float) (stat.a / grav);
             power(stat.thrusters, (float) Math.Abs(Math.Pow(Math.Abs(s * powerK), nonLinearPowerK) + grav));
-            if (stat.thrusters.Count() == 0) // рассчет на гравитацию
+            if (!stat.thrusters.Any()) // рассчет на гравитацию
                 power(stats[stat.opposite].thrusters, 0.01f);
         }
 
@@ -594,7 +697,7 @@ public sealed class Miner : MyGridProgram {
                 g.Roll = roll;
                 g.Pitch = pitch;
             });
-            return Math.Abs(yaw) < 0.01 && Math.Abs(pitch) < 0.01 && Math.Abs(roll) < 0.01;
+            return Math.Abs(yaw) < 0.02 && Math.Abs(pitch) < 0.02 && Math.Abs(roll) < 0.02;
         }
 
         /**
@@ -613,10 +716,88 @@ public sealed class Miner : MyGridProgram {
         }
     }
 
-
 /* ==============================================================
  * =================== ОБЩЕГО НАЗНАЧЕНИЯ ========================
  * ============================================================*/
+    public interface Process : Job {
+        void add(Job j);
+        Job current();
+        Job[] all();
+    }
+
+    public interface Job {
+        Job exec();
+    }
+
+    public class TheJob : Job {
+        private Func<Job> func;
+
+        public TheJob(Func<Job> func) {
+            this.func = func;
+        }
+
+        public Job exec() => func.Invoke();
+    }
+
+    public class StackProc : Process {
+        private Stack stack = new Stack();
+
+        public Job exec() {
+            if (stack.Count == 0) return null;
+            var job = stack.Peek() as Job;
+            var res = job.exec();
+            if (res == null) stack.Pop(); // задача закончилась
+            else if (res != job) stack.Push(res); // новая подзадача
+            else ; // иначе - задача не закончена
+            return stack.Count > 0 ? this : null;
+        }
+
+        public void add(Job j) => stack.Push(j);
+        public Job current() => (Job) stack.Peek();
+        public Job[] all() => (Job[]) stack.ToArray();
+    }
+
+    public class QueuedProc : Process {
+        private Queue q = new Queue();
+
+        public Job exec() {
+            if (q.Count == 0) return null;
+            var job = q.Peek() as Job;
+            var res = job.exec();
+            if (res == null) q.Dequeue(); // задача закончилась
+            else if (res != job) q.Enqueue(res); // новая подзадача
+            else ; // иначе - задача не закончена
+            return q.Count > 0 ? this : null;
+        }
+
+        public void add(Job j) {
+            q.Enqueue(j);
+        }
+
+        public Job current() => (Job) q.Peek();
+
+        public Job[] all() => (Job[]) q.ToArray();
+    }
+
+    public class TransferJob : Job {
+        private Rider rider;
+        private Vector3D pos1, pos2;
+        private bool reverse;
+
+        public TransferJob(Vector3D pos1, Vector3D pos2) {
+            ctx.get(ref rider);
+            this.pos2 = pos2;
+            this.pos1 = pos1;
+        }
+
+        public Job exec() {
+            if (rider.moveTo(reverse ? pos1 : pos2)) {
+                reverse = !reverse;
+            }
+            return this;
+        }
+    }
+
     public class Context : StackProc, Tickable {
         public static int ticks;
         private Dictionary<String, object> data;
@@ -688,6 +869,15 @@ public sealed class Miner : MyGridProgram {
             List<T> list = new List<T>();
             gts.GetBlocksOfType(list, arg => true);
             return t = list.First();
+        }
+
+        public Vector3D vectorFromGps(String gpsStr) {
+            var strings = gpsStr.Split(':');
+            return new Vector3D(Double.Parse(strings[2]),Double.Parse(strings[3]),Double.Parse(strings[4]));
+        }
+
+        public string vectorToGps(Vector3D vec, string name) {
+            return "GPS:" + name + ":" + vec.X + ":" + vec.Y + ":" + vec.Z + ":";
         }
     }
 

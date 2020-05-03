@@ -3,6 +3,8 @@ using System.Text;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
 using System.Runtime.Serialization.Json;
 using LitJson;
 using VRageMath;
@@ -23,22 +25,177 @@ public class Dispatcher : MyGridProgram {
     public static Context ctx = new Context(new Dictionary<string, object> {
         {"lcdName", "lcdL"}
     });
-    
-    
 
     public Program() {
+        init();
+    }
+
+    public void init() {
+        ctx.put("gts", GridTerminalSystem);
+        ctx.put("runtime", Runtime);
+        Util util = ctx.put("utils", new Util());
         ctx.putForce("lcd", GridTerminalSystem.GetBlockWithName(ctx.get("lcdName").ToString()) as IMyTextPanel);
     }
 
-    public void Save() {
-    }
+    public void Save() { }
 
-    public void Main(string argument, UpdateType updateSource) {
-        ((IMyTextPanel) ctx.get("lcd")).WritePublicText("qweqwe");
+    public void Main(string argument, UpdateType updateSource) { }
+
+
+/* ==============================================================
+ * ======================= РАДИООБМЕН ===========================
+ * ============================================================*/
+
+    class RadioMessage {
+        private const string delim = "###";
+        private const string keyValueDelim = "$$$";
+        private string @from;
+        private string to;
+        private string command;
+        private string data;
+
+        public RadioMessage(
+            string from,
+            string to,
+            string command,
+            string data
+        ) {
+            this.from = from;
+            this.to = to;
+            this.command = command;
+            this.data = data;
+        }
     }
 
 /* ==============================================================
- * =================== ОБЩЕГО НАЗНАЧЕНИЯ ========================
+ * ===================  СКРИАЛИЗАЦИЯ  ========================
+ * ============================================================*/
+    class Serializer {
+        private const char keyValDelim = ':';
+        private const char start = '{';
+        private const char end = '}';
+        private const char stringStart = '"';
+        private const char stringEnd = '"';
+        private const char arrStart = '[';
+        private const char arrEnd = ']';
+        private const char delim = ',';
+        private const char escape = '\\';
+
+        public static object parse(ref String s, ref int index) {
+            object o = null;
+            while (index < s.Length) {
+                char ch = s[index];
+                index++;
+                if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t' || ch == keyValDelim) continue;
+                if (ch == arrEnd || ch == end || ch == delim) return o;
+                if (ch == arrStart) return parseList(ref s, ref index);
+                if (ch == start) return parseDict(ref s, ref index);
+                if (ch == stringStart) return parseString(ref s, ref index);
+                index--;
+                return parseNum(ref s, ref index);
+            }
+            return null;
+        }
+
+        private static string parseString(ref string s, ref int index) {
+            List<char> buf = new List<char>();
+            Char last = '"';
+            for (; index < s.Length; index++) {
+                char ch = s[index];
+                if (ch == stringEnd && last != escape) {
+                    index++;
+                    return String.Concat(buf);
+                }
+                if (last == escape && ch != stringEnd) {
+                    buf.Add(last);
+                }
+                if (ch != escape)
+                    buf.Add(ch);
+                last = ch;
+            }
+            return null;
+        }
+
+        private static object parseNum(ref string s, ref int index) {
+            List<char> buf = new List<char>();
+            bool dec = false;
+            for (; index < s.Length; index++) {
+                char ch = s[index];
+                if (ch == keyValDelim || ch == delim || ch == end || ch == arrEnd) {
+                    break;
+                }
+                if (ch == '.') dec = true;
+                buf.Add(ch);
+            }
+            object a = dec
+                ? float.Parse(String.Concat(buf), CultureInfo.InvariantCulture)
+                : int.Parse(String.Concat(buf).Trim());
+            return a;
+        }
+
+        private static List<object> parseList(ref string s, ref int index) {
+            List<object> list = new List<object>();
+            while (s[index] != arrEnd) {
+                list.Add(parse(ref s, ref index));
+                if (s[index] == delim || s[index] == ' ') index++;
+            }
+            index++;
+            return list;
+        }
+
+        private static Dictionary<object, object> parseDict(ref string s, ref int index) {
+            Dictionary<object, object> dic = new Dictionary<object, object>();
+            while (s[index] != end) {
+                object key = parse(ref s, ref index);
+                index++;
+                while (s[index] == ' ' || s[index] == keyValDelim) index++;
+                object val = parse(ref s, ref index);
+                dic.Add(key, val);
+                while (s[index] == ' ' || s[index] == delim) index++;
+            }
+            return dic;
+        }
+
+        public static string encode(object o) {
+            if (o is List<object>) {
+                var sb = new StringBuilder();
+                sb.Append("[");
+                bool first = true;
+                ((List<object>) o).ForEach(o1 => {
+                    if (!first) sb.Append(",");
+                    sb.Append(encode(o1));
+                    first = false;
+                });
+                sb.Append("]");
+                return sb.ToString();
+            }
+            if (o is int || o is float || o is double) {
+                return o.ToString().Replace(',', '.');
+            }
+            if (o is string) {
+                return "\"" + ((string) o).Replace("\"", "\\\"") + "\"";
+            }
+            if (o is Dictionary<object, object>) {
+                var sb = new StringBuilder();
+                sb.Append("{");
+                bool first = true;
+                foreach (var (key, value) in (Dictionary<object, object>) o) {
+                    string k = encode(key);
+                    string v = encode(value);
+                    if (k == null || v == null) continue;
+                    if (!first) sb.Append(",");
+                    first = false;
+                    sb.Append(k).Append(":").Append(v);
+                }
+                sb.Append("}");
+                return sb.ToString();
+            }
+            return null;
+        }
+    }
+
+/* ==============================================================
+ * ================  ОРГАНИЗАЦИЯ ПРОЦЕССОВ  ====================
  * ============================================================*/
     public interface Process : Job {
         void add(Job j);
@@ -100,26 +257,9 @@ public class Dispatcher : MyGridProgram {
         public Job[] all() => (Job[]) q.ToArray();
     }
 
-#if RIDER
-    public class TransferJob : Job {
-        private Rider rider;
-        private Vector3D pos1, pos2;
-        private bool reverse;
-
-        public TransferJob(Vector3D pos1, Vector3D pos2) {
-            ctx.get(ref rider);
-            this.pos2 = pos2;
-            this.pos1 = pos1;
-        }
-
-        public Job exec() {
-            if (rider.moveTo(reverse ? pos1 : pos2)) {
-                reverse = !reverse;
-            }
-            return this;
-        }
-    }
-#endif
+/* ==============================================================
+ * ===================  ОБЩЕГО НАЗНАЧЕНИЯ  ======================
+ * ============================================================*/
     public class Context : StackProc, Tickable {
         public static int ticks;
         private Dictionary<String, object> data;
@@ -197,5 +337,4 @@ public class Dispatcher : MyGridProgram {
     public interface Tickable {
         void tick();
     }
-
 }

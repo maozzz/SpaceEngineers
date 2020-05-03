@@ -29,4 +29,9 @@ public class Util : MyGridProgram {
         gts.GetBlocksOfType(list, arg => true);
         t = list.First();
     }
+
+    public Vector3D vectorFromGps(String gpsStr) {
+        var strings = gpsStr.Split(":");
+        return new Vector3D(Double.Parse(strings[1]),Double.Parse(strings[1]),Double.Parse(strings[1]));
+    }
 }
