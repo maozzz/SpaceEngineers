@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Sandbox.Common.ObjectBuilders;
 using Sandbox.Game.Entities.Blocks;
 using Sandbox.ModAPI.Ingame;
 using VRage.Game.VisualScripting.Utils;
@@ -9,6 +10,8 @@ using VRageMath;
 
 namespace SpaceEngineers.TerraNova {
     public class Program  : MyGridProgram{
+        // START
+        
         public static Context ctx = new Context(new Dictionary<string, object> {
             {"lcdName", "lcd"},
             {"lcd", null}, // основной дисплей для отображения
@@ -23,6 +26,7 @@ namespace SpaceEngineers.TerraNova {
         }
 
         public void Main(string argument, UpdateType updateSource) {
+            ctx.putForce("arg", argument);
             ctx.tick();
             
             if (Context.ticks % 60 == 0 || ctx.get("arg").ToString() != null) {
@@ -31,20 +35,36 @@ namespace SpaceEngineers.TerraNova {
         }
 
         public void init() {
+            ctx.putForce("gts", GridTerminalSystem);
             lcd =  ctx.putForce("lcd",GridTerminalSystem.GetBlockWithName(ctx.get("lcdName").ToString()) as IMyTextPanel);
             lcd.WriteText("Initialisation...");
-            menu = ctx.putForce("menu", new SimpleMenu("menu", null));
-            
-            Menu restart = new SimpleMenu("restart", menu);
-            restart.add(new ChangeVarMenuItem(new SimpleReactMsg(
-                "equip ON",
-                null, () => string.Format("={0}", "DONE")), () => {
-                equipOn();
-            }));
+
+            initMenu();
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
         }
 
-        private void equipOn() {
+        private void initMenu() {
+            menu = ctx.putForce("menu", new SimpleMenu("menu", null));
             
+            Menu power = new SimpleMenu("power", menu);
+            power.add(new ChangeVarMenuItem(new SimpleReactMsg(
+                "power on",
+                null, () => string.Format("={0}", "DONE")), () => {
+                powerOn();
+            }));
+            menu.add(power);
+        }
+
+        private void powerOn() {
+            List<IMyFunctionalBlock> blocks = new List<IMyFunctionalBlock>();
+            GridTerminalSystem.GetBlocksOfType(blocks, block => {
+                if (block is IMyShipConnector) return true;
+                if (block is IMyRefinery) return true;
+                if (block is IMyAssembler) return true;
+                if (block is IMyProgrammableBlock) return true;
+                return false;
+            });
+            blocks.ForEach(b => b.Enabled = true);
         }
 
 /* ==============================================================
@@ -446,5 +466,7 @@ namespace SpaceEngineers.TerraNova {
         public interface Tickable {
             void tick();
         }
+        
+        //END
     }
 }
