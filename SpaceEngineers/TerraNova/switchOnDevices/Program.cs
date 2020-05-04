@@ -5,7 +5,9 @@ using System.Linq;
 using Sandbox.Common.ObjectBuilders;
 using Sandbox.Game.Entities.Blocks;
 using Sandbox.ModAPI.Ingame;
+using VRage.Game.ModAPI;
 using VRage.Game.VisualScripting.Utils;
+using VRage.Network;
 using VRageMath;
 
 namespace SpaceEngineers.TerraNova {
