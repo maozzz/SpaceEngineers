@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <!-- 
+    Contains basic settings that should be included in code repositories
+    -->
+    <MDKVersion>1.2.31</MDKVersion>
+    <MDKTrimTypes>
+      <Enabled>no</Enabled>
+    </MDKTrimTypes>
+    <MDKMinify>
+      <!--<Level>Full</Level> -->
+		<Level>NONE</Level>
+    </MDKMinify>
+    <MDKIgnore>
+      <Folder>mdk</Folder>
+    </MDKIgnore>
+  </PropertyGroup>
+</Project>

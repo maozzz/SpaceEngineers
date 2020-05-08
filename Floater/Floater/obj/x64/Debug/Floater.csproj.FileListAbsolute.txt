@@ -141,9 +141,9 @@ C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\bin\ru\Microso
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\bin\tr\Microsoft.CodeAnalysis.resources.dll
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\bin\zh-Hans\Microsoft.CodeAnalysis.resources.dll
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\bin\zh-Hant\Microsoft.CodeAnalysis.resources.dll
-C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.csprojAssemblyReference.cache
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.exe.config
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.csproj.CoreCompileInputs.cache
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.csproj.CopyComplete
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.exe
 C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.pdb
+C:\Users\maoz\YandexDisk\projects\space_engineers\Floater\Floater\obj\x64\Debug\Floater.csprojAssemblyReference.cache

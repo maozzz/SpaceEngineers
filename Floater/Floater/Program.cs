@@ -54,7 +54,7 @@ namespace IngameScript
 
 
             // Обрабочики аргументов
-            ctx.addArgumentAction("compensation", () => ctx.putForce("flightMode", FlightMode.compensation));
+            ctx.addArgumentAction("compensate", () => ctx.putForce("flightMode", FlightMode.compensation));
             ctx.addArgumentAction("point", () => ctx.putForce("flightMode", FlightMode.toPoint));
             ctx.addArgumentAction("free", () =>
             {
@@ -73,13 +73,32 @@ namespace IngameScript
         public void Main(string argument, UpdateType updateSource)
         {
             ctx.tick(argument);
+
+            if (ctx.getTicks() % 100 == 0)
+            {
+                rider.recalcLTH();
+                return;
+            }
+
             switch ((FlightMode)ctx.get("flightMode"))
             {
                 case FlightMode.compensation:
                     rider.compensation();
                     break;
                 case FlightMode.toPoint:
-                    if (rider.orient(point - ctrl.GetPosition(), ctrl.GetNaturalGravity(), 0.001f)) rider.toPoint(point);
+                    Vector3D pathVec = util.vectorFromGps("GPS:mao_z #3:53564.2:-26578.3:12264:") - util.vectorFromGps("GPS:mao_z #4:53560.38:-26660.58:12079.39:");
+                    //rider.toPoint(point, 2);
+                    if (rider.orient(pathVec, ctrl.GetNaturalGravity()))
+                    {
+                        if (rider.toPoint(point, pathVec, 3f, 10))
+                        {
+                            rider.compensation();
+                        }
+                    }
+                    else
+                    {
+                        rider.compensation();
+                    }
                     break;
                 default:
                     break;

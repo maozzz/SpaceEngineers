@@ -16,11 +16,17 @@ using VRage.Game;
 using VRageMath;
 using System.IO;
 using VRageRender;
+using Sandbox.Game.Screens.Helpers.RadialMenuActions;
 
 namespace IngameScript
 {
     partial class Program
     {
+        /// <summary>
+        /// Параметры, берущиеся из контекта:
+        /// gyroMult - множитель для вращения гироскопа. {"gyroMult", 2f},
+        /// weakThrusters - enum из <code>ThrustDirection</code> определяющий на каком направлении самые слабые двигатели  {"weakThrusters", ThrustDirection.L}
+        /// </summary>
 
         public class Rider
         {
@@ -42,32 +48,30 @@ namespace IngameScript
                 this.ctrl = ctrl;
                 this.lcd = lcd;
 
-                this.gyroMult = ctx.contains("gyroMult") ? ((float) ctx.get("gyroMult")) : 1f;
+                this.gyroMult = ctx.contains("gyroMult") ? ((float)ctx.get("gyroMult")) : 1f;
 
-                // Предрассчет ЛТХ
                 recalcLTH();
             }
 
+            /// <summary>
+            /// Перерассчет ЛТХ ЛА
+            /// </summary>
             public void recalcLTH()
             {
                 this.mass = ctrl.CalculateShipMass().PhysicalMass;
                 initThrusters();
-                initGyros();
+                gts.GetBlocksOfType(gyrosAll); // инициализация гироскопов
             }
 
-            public void initGyros()
-            {
-                gts.GetBlocksOfType(gyrosAll);
-            }
 
             /// <summary>
-            /// Направляет нос корабля на точку. Вертикальную ось совмещает с orientation.
+            /// Направляет нос корабля на точку. Направление вниз совмещает с orientation.
             /// Если сигналы по  осям меньше dW - возвращает true.
             /// </summary>
             /// <param name="direction"></param>
-            public bool orient(Vector3D direction, Vector3D orientation, float dW)
+            public bool orient(Vector3D direction, Vector3D orientation, float dW = 0.1f)
             {
-                Vector3D dir = Vector3D.Normalize(direction);
+                Vector3D dir = Vector3D.Normalize(Vector3D.ProjectOnPlane(ref direction, ref orientation));
                 Vector3D orient = Vector3D.Normalize(orientation);
                 float yaw = (float)dir.Dot(ctrl.WorldMatrix.Right) * gyroMult;
                 float pitch = (float)orient.Dot(ctrl.WorldMatrix.Backward) * gyroMult;
@@ -79,8 +83,7 @@ namespace IngameScript
                     g.Pitch = pitch;
                     g.Roll = roll;
                 });
-                lcd.WriteText(yaw.ToString() + " " + pitch.ToString() + " " + roll.ToString());
-                return (yaw < dW && roll < dW && pitch < dW) ? true : false;
+                return (Math.Abs(yaw) < dW) && (Math.Abs(roll) < dW) && (Math.Abs(pitch) < dW);
             }
 
             /// <summary>
@@ -107,21 +110,55 @@ namespace IngameScript
                 if (ctx.contains("weakThrusters")) this.weakA = thrsByDir[(ThrustDirection)ctx.get("weakThrusters")].getA();
             }
 
-            public void toPoint(Vector3D point, float safeK = 0.8f)
+            /// <summary>
+            /// Перемещение к точке. safeK - коэффициент запаса самого опасного ускорения (weakA).
+            /// Когда расстояние меньше lenOk - цель достигнута - возвращаем true;
+            /// </summary>
+            /// <param name="point"></param>
+            /// <param name="safeK">Коэффициент запаса по направлению самых слабых двигателей</param>
+            /// <param name="logDist">Дистанция перехода на логарифмическое торможение</param>
+            /// <param name="logE">Основание логарифма торможения</param>
+            /// <param name="logK">Множитель логарифма</param>
+            /// <param name="aMult">Мультипликатор ускорения</param>
+            public bool toPoint(Vector3D point, float velocity = 0, float safeK = 0.8f, float lenOk = 0.1f, double logDist = 5, double logE = Math.E, float logK = 1, float aMult = 2)
             {
                 ctrl.DampenersOverride = false;
                 var path = point - ctrl.GetPosition(); // вектор до цели
                 var len = path.Length();
-                var vAbs = len > 10 ? Math.Sqrt(2 * len * weakA * safeK) : Math.Min(len, 2);
+                if (len < lenOk) return true;
+                var vAbs = velocity == 0
+                        ? len > logDist ? Math.Sqrt(2 * len * weakA * safeK) : Math.Log(len + 1, logE) * logK
+                        : velocity;
                 var desiredV = Vector3D.Normalize(path) * vAbs; // Желаемый вектор скорости
                 var desiredA = desiredV - ctrl.GetShipVelocities().LinearVelocity;
-                thrustA(desiredA * 2 - ctrl.GetNaturalGravity());
+                thrustA(desiredA * aMult - ctrl.GetNaturalGravity());
+                return false;
             }
 
-            public void compensation()
+            /// <summary>
+            /// Перемещение к точке вдоль вектора. safeK - коэффициент запаса самого опасного ускорения (weakA).
+            /// Когда расстояние меньше lenOk - цель достигнута - возвращаем true;
+            /// </summary>
+            /// <param name="point"></param>
+            /// <param name="pathVec">Вектор движения, вдоль которого надо двигаться.</param>
+            /// <param name="pathVecK">Коэффициент притяжения к вектору пути.</param>
+            /// <param name="safeK">Коэффициент запаса по направлению самых слабых двигателей</param>
+            /// <param name="logDist">Дистанция перехода на логарифмическое торможение</param>
+            /// <param name="logK">Основание логарифма торможения</param>
+            /// <param name="aMult">Мультипликатор ускорения</param>
+            public bool toPoint(Vector3D point, Vector3D pathVec, float velocity = 0, float pathVecK = 1, float safeK = 0.8f, float lenOk = 0.1f, double logDist = 5, double logE = Math.E, float logK = 1, float aMult = 2)
+            {
+                var path = point - ctrl.GetPosition(); // вектор до цели
+                var newPoint = point + Vector3D.ProjectOnPlane(ref path, ref pathVec) * pathVecK;
+                return toPoint(newPoint, velocity, safeK, lenOk, logDist, logE, logK, aMult);
+            }
+
+            public void compensation(bool damp = true, float dampK = 1)
             {
                 ctrl.DampenersOverride = false;
-                thrustA(-ctrl.GetNaturalGravity());
+                Vector3D desired = -ctrl.GetNaturalGravity();
+                if (damp) desired -= dampK * ctrl.GetShipVelocities().LinearVelocity;
+                thrustA(desired);
             }
 
             /// <summary>
@@ -161,7 +198,10 @@ namespace IngameScript
                 ctrl.DampenersOverride = true;
                 thrsAll.ForEach(th => th.ThrustOverride = 0);
             }
+
+            public float getMass() => mass;
         }
+        // END OF RIDER
 
         public enum ThrustDirection
         {

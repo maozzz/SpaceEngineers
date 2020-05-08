@@ -4,10 +4,10 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{C86AF3F4-6830-446A-AC03-513F5E3E87E8}</ProjectGuid>
+    <ProjectGuid>{79409346-FDFE-49AF-9446-2208B36FD9B3}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>IngameScript</RootNamespace>
-    <AssemblyName>Floater</AssemblyName>
+    <AssemblyName>Miner</AssemblyName>
     <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -45,15 +45,16 @@
     <AdditionalFiles Include="MDK\MDK.paths.props">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </AdditionalFiles>
-    <Compile Include="Program.cs" />
+    <Compile Include="Miner.cs" />
     <AdditionalFiles Include="Instructions.readme" />
     <AdditionalFiles Include="thumb.png" />
     <AdditionalFiles Include="MDK\whitelist.cache" />
   </ItemGroup>
   <Import Project="..\..\Context\Context\Context.projitems" Label="Shared" />
-  <Import Project="..\..\Util\Util\Util.projitems" Label="Shared" />
-  <Import Project="..\..\Rider\Rider\Rider.projitems" Label="Shared" />
+  <Import Project="..\..\Menu\Menu\Menu.projitems" Label="Shared" />
   <Import Project="..\..\Processes\Processes\Processes.projitems" Label="Shared" />
+  <Import Project="..\..\Rider\Rider\Rider.projitems" Label="Shared" />
+  <Import Project="..\..\Util\Util\Util.projitems" Label="Shared" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="AfterBuild">
     <Copy SourceFiles="MDK\MDK.options.props" DestinationFolder="$(TargetDir)\MDK" />

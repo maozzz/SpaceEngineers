@@ -9,6 +9,6 @@
     <Import_RootNamespace>IngameScript</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(MSBuildThisFileDirectory)Gyro.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Processes.cs" />
   </ItemGroup>
 </Project>

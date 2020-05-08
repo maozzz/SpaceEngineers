@@ -16,14 +16,21 @@ Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Util", "..\Util\Util\Util.s
 EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Rider", "..\Rider\Rider\Rider.shproj", "{61EBA249-19F3-48B6-A25B-A4CEE90168BA}"
 EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Processes", "..\Processes\Processes\Processes.shproj", "{16FD1A2A-928E-4F96-8286-BF37DB18DB38}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Menu", "..\Menu\Menu\Menu.shproj", "{FAF9E424-4C5D-4494-8A57-D02A34299A5B}"
+EndProject
 Global
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\Processes\Processes\Processes.projitems*{16fd1a2a-928e-4f96-8286-bf37db18db38}*SharedItemsImports = 13
 		..\Context\Context\Context.projitems*{3c3cd0e1-a307-4ed1-bfce-3fe58b1a2cf6}*SharedItemsImports = 13
 		..\Rider\Rider\Rider.projitems*{61eba249-19f3-48b6-a25b-a4cee90168ba}*SharedItemsImports = 13
 		..\Util\Util\Util.projitems*{62544e58-133f-4baa-9dcb-84a37f34ad6e}*SharedItemsImports = 13
 		..\Context\Context\Context.projitems*{c86af3f4-6830-446a-ac03-513f5e3e87e8}*SharedItemsImports = 4
+		..\Processes\Processes\Processes.projitems*{c86af3f4-6830-446a-ac03-513f5e3e87e8}*SharedItemsImports = 4
 		..\Rider\Rider\Rider.projitems*{c86af3f4-6830-446a-ac03-513f5e3e87e8}*SharedItemsImports = 4
 		..\Util\Util\Util.projitems*{c86af3f4-6830-446a-ac03-513f5e3e87e8}*SharedItemsImports = 4
+		..\Menu\Menu\Menu.projitems*{faf9e424-4c5d-4494-8a57-d02a34299a5b}*SharedItemsImports = 13
 	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
