@@ -98,7 +98,7 @@ namespace IngameScript
             {
                 if (q.Count == 0) return null;
                 var job = q.Peek() as Job;
-                var res = job.exec();
+                var res = job != null ? job.exec() : null;
                 if (res == null && q.Count>0) q.Dequeue(); // задача закончилась
                 else if (res != job) q.Enqueue(res); // новая подзадача
                 //else; // иначе - задача не закончена

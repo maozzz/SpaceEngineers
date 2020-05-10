@@ -17,7 +17,7 @@ using VRageMath;
 
 namespace IngameScript
 {
-    partial class Program
+    partial class Hover
     {
         /**
          * Создание: Util util = new Util();

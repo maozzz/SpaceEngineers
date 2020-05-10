@@ -97,7 +97,7 @@ namespace IngameScript
             if (ctx.getTicks() % 10 == 0)
             {
                 rider.recalcLTH();
-                if (rider.getMass() > (int)ctx.get("permitMass")) systemOverload = true;
+                systemOverload =(rider.getMass() > (int)ctx.get("permitMass"));
                 lcdMenu.WriteText(menu.exec());
                 return;
             }
@@ -145,6 +145,11 @@ namespace IngameScript
                       null, () => "dock OK"), () => {
                           proc.add(dockJob());
                       }));
+            actions.add(new ChangeVarMenuItem(new SimpleReactMsg(
+                      "undock",
+                      null, () => "undock OK"), () => {
+                          proc.add(undockJob());
+                      }));
 
             menu.add(actions);
 
@@ -179,6 +184,11 @@ namespace IngameScript
             permMass.add(new ChangeVarMenuItem("permitMass", 1000, "pm+", "={0}"));
             permMass.add(new ChangeVarMenuItem("permitMass", -1000, "pm-", "={0}"));
             submenu.add(permMass);
+
+            Menu mineVel = new SimpleMenu("mine speed", submenu);
+            mineVel.add(new ChangeVarMenuItem("mineVelocity", 0.1, "speed+", "={0}"));
+            mineVel.add(new ChangeVarMenuItem("mineVelocity", -0.1, "speed-", "={0}"));
+            submenu.add(mineVel);
             menu.add(submenu);
         }
 
@@ -225,7 +235,6 @@ namespace IngameScript
                 case 4:
                     toDock();
                     return true;
-                    break;
             }
             return false;
         }
@@ -235,10 +244,12 @@ namespace IngameScript
             Vector3D mineDirection = (Vector3D)ctx.get("mineDirection");
             Vector3D mineOrientation = (Vector3D)ctx.get("mineOrientation");
             Vector3D path = -mineDirection;
-            if (rider.orient(mineOrientation, mineDirection) && rider.toPoint(currentTunnelPoint, path, (float)ctx.get("mineVelocity") * 2))
+            if (rider.orient(mineOrientation, mineDirection) && rider.toPoint(currentTunnelPoint, path, (float)ctx.get("mineVelocity") * 3))
             {
                 stageStatus = 1;
             }
+            lcd.WriteText("shft Num: " + (int)ctx.get("shaftN") + "\n", true);
+            lcd.WriteText("Mass: " + rider.getMass() + "\n", true);
             return false;
         }
         private Boolean doMine()
@@ -252,11 +263,20 @@ namespace IngameScript
             Vector3D mineDirection = (Vector3D)ctx.get("mineDirection");
             Vector3D mineOrientation = (Vector3D)ctx.get("mineOrientation");
             Vector3D floor = currentTunnelPoint + mineDirection * tunnelDepth;
-            if (rider.orient(mineOrientation, mineDirection) && rider.toPoint(floor, mineDirection, (float)ctx.get("mineVelocity")))
+            var d = (floor - ctrl.GetPosition()).Length();
+            if (rider.orient(mineOrientation, mineDirection, 0.4f) && rider.toPoint(floor, mineDirection, (float)ctx.get("mineVelocity"), 10, 0.8f, 1))
             {
                 ctx.putForce("shaftN", (int)ctx.get("shaftN") + 1);
                 return true;
             }
+            Vector3D donePath = (ctrl.GetPosition() - currentTunnelPoint);
+            var curDepth = donePath.Dot(mineDirection);
+            var deviation = Vector3D.ProjectOnPlane(ref donePath, ref mineDirection).Length();
+            lcd.WriteText($"Depth: {curDepth:F2}\n", true);
+            lcd.WriteText($"Remain: {d:F2}\n", true);
+            lcd.WriteText($"Deviation: {deviation:F2}\n", true);
+            lcd.WriteText("Shft Num: " + (int)ctx.get("shaftN") + "\n", true);
+            lcd.WriteText("Mass: " + rider.getMass() + "\n", true);
             return false;
         }
         private void drillsOn(Boolean on)
@@ -381,7 +401,6 @@ namespace IngameScript
                 prev = waypoints[i];
             }
             proc.add(dockJob());
-            proc.add(freeJob());
         }
 
         public Job moveJob(Vector3D point, Vector3D path, string num = "") => new TheJob("movind", () =>
@@ -400,7 +419,8 @@ namespace IngameScript
             unloadTimer = (int)ctx.get("dockTimer") * 6;
             return new TheJob("unloading", () =>
             {
-                lcd.WriteText("Unloading: " + unloadTimer.ToString());
+                lcd.WriteText("Unloading: " + unloadTimer.ToString() + "\n");
+                lcd.WriteText("Mass: " + ctrl.CalculateShipMass().TotalMass + "\n", true);
                 unloadTimer--;
                 if (unloadTimer <= 0)
                 {
@@ -441,6 +461,7 @@ namespace IngameScript
                 { // Приблизились к коннектору
                     if (conn.Status == MyShipConnectorStatus.Connectable)
                     {
+                        rider.free();
                         conn.Connect();
                         proc.add(unloadJob());
                         return true;
@@ -456,6 +477,7 @@ namespace IngameScript
         /// <returns></returns>
         public Job undockJob()
         {
+            ((IMyShipConnector)ctx.get("connector")).Disconnect();
             return new TheJob("undock", () =>
             {
                 Vector3D dir = ctrl.WorldMatrix.Forward;
@@ -466,12 +488,8 @@ namespace IngameScript
                     lcd.WriteText("Connector undefined", true);
                     return true; // закончить задачу
                 }
-                if (conn.Status == MyShipConnectorStatus.Connected) {
-                    conn.Disconnect();
-                    rider.recalcLTH();
-                }
                 rider.orient(dir, ctrl.GetNaturalGravity());
-                if (rider.toPoint(p, 3))
+                if (rider.toPoint(p))
                 {
                     toMine();
                     return true;
@@ -548,6 +566,7 @@ namespace IngameScript
             ini.Set("params", "shaftW", ctx.get("shaftW").ToString());
             ini.Set("params", "shaftN", ctx.get("shaftN").ToString());
             ini.Set("params", "permitMass", ctx.get("permitMass").ToString());
+            ini.Set("params", "mineVelocity", ctx.get("mineVelocity").ToString());
             Me.CustomData = ini.ToString();
         }
 
@@ -557,10 +576,14 @@ namespace IngameScript
             MyIniParseResult result;
             if (!ini.TryParse(Me.CustomData, out result))
                 throw new Exception(result.ToString());
-            ctx.putForce("dockPoint", util.vectorFromGps(ini.Get("dock", "dockPoint").ToString()));
-            ctx.putForce("dockDirection", util.vectorFromGps(ini.Get("dock", "dockDirection").ToString()));
-            IMyShipConnector dConn = ctx.putForce("connector", gts.GetBlockWithName(ini.Get("dock", "connector").ToString()) as IMyShipConnector);
-            if (dConn == null) lcd.WriteText("connector undefined\n"); else lcd.WriteText("dock loaded\n");
+            if (ini.ContainsKey("dock", "dockPoint")) ctx.putForce("dockPoint", util.vectorFromGps(ini.Get("dock", "dockPoint").ToString()));
+            if (ini.ContainsKey("dock", "dockDirection"))
+            {
+                ctx.putForce("dockDirection", util.vectorFromGps(ini.Get("dock", "dockDirection").ToString()));
+                IMyShipConnector dConn = ctx.putForce("connector", gts.GetBlockWithName(ini.Get("dock", "connector").ToString()) as IMyShipConnector);
+                if (dConn == null) lcd.WriteText("connector undefined\n"); else lcd.WriteText("dock loaded\n");
+                dConn.Enabled = true;
+            }
 
             // waypoints
             List<MyIniKey> keys = new List<MyIniKey>();
@@ -588,6 +611,7 @@ namespace IngameScript
             if (ini.ContainsKey("params", "shaftW")) ctx.putForce("shaftW", float.Parse(ini.Get("params", "shaftW").ToString()));
             if (ini.ContainsKey("params", "shaftN")) ctx.putForce("shaftN", ini.Get("params", "shaftN").ToInt32());
             if (ini.ContainsKey("params", "permitMass")) ctx.putForce("permitMass", ini.Get("params", "permitMass").ToInt32());
+            if (ini.ContainsKey("params", "mineVelocity")) ctx.putForce("mineVelocity", float.Parse(ini.Get("params", "mineVelocity").ToString()));
         }
 
         class MinerProc : QueuedProc

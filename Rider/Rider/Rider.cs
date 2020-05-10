@@ -120,9 +120,9 @@ namespace IngameScript
             /// <param name="logE">Основание логарифма торможения</param>
             /// <param name="logK">Множитель логарифма</param>
             /// <param name="aMult">Мультипликатор ускорения</param>
-            public bool toPoint(Vector3D point, float velocity = 0, float safeK = 0.8f, float lenOk = 0.1f, double logDist = 5, double logE = Math.E, float logK = 1, float aMult = 2)
+            public bool toPoint(Vector3D point, float velocity = 0, float safeK = 0.8f, float lenOk = 0.2f, double logDist = 5, double logE = Math.E, float logK = 1, float aMult = 2)
             {
-                ctrl.DampenersOverride = false;
+                //ctrl.DampenersOverride = false;
                 var path = point - ctrl.GetPosition(); // вектор до цели
                 var len = path.Length();
                 if (len < lenOk) return true;
